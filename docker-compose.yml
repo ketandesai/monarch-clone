@@ -1,0 +1,46 @@
+services:
+  # Next.js Application Service
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: monarch_app
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - DATABASE_URL=postgresql://postgres:postgres@db:5432/monarch?schema=public
+      - DIRECT_URL=postgresql://postgres:postgres@db:5432/monarch?schema=public
+      - NEXT_PUBLIC_APP_URL=http://localhost:3000
+      - PLAID_CLIENT_ID=${PLAID_CLIENT_ID:-mock_plaid_client_id}
+      - PLAID_SECRET=${PLAID_SECRET:-mock_plaid_sandbox_secret}
+      - PLAID_ENV=${PLAID_ENV:-sandbox}
+      - NEXT_PUBLIC_SUPABASE_URL=${NEXT_PUBLIC_SUPABASE_URL:-https://example.supabase.co}
+      - NEXT_PUBLIC_SUPABASE_ANON_KEY=${NEXT_PUBLIC_SUPABASE_ANON_KEY:-mock-anon-key}
+    depends_on:
+      db:
+        condition: service_healthy
+
+  # PostgreSQL Database Service
+  db:
+    image: postgres:16-alpine
+    container_name: monarch_db
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=monarch
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d monarch"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:
+    driver: local

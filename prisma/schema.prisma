@@ -1,0 +1,257 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+enum Role {
+  ADMIN
+  GUEST
+}
+
+enum AccountType {
+  DEPOSITORY
+  INVESTMENT
+  CREDIT
+  LOAN
+  OTHER
+}
+
+enum CategoryGroupType {
+  INCOME
+  FIXED_EXPENSE
+  VARIABLE_EXPENSE
+  NON_MONTHLY
+}
+
+enum Frequency {
+  WEEKLY
+  BIWEEKLY
+  MONTHLY
+  QUARTERLY
+  ANNUALLY
+}
+
+model User {
+  id            String          @id @default(uuid())
+  email         String          @unique
+  name          String?
+  role          Role            @default(ADMIN)
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+
+  plaidItems    PlaidItem[]
+  accounts      Account[]
+  categoryGroups CategoryGroup[]
+  categories    Category[]
+  transactions  Transaction[]
+  budgets       Budget[]
+  rules         Rule[]
+  recurring     RecurringItem[]
+
+  @@map("users")
+}
+
+model PlaidItem {
+  id              String      @id @default(uuid())
+  userId          String
+  user            User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  itemId          String      @unique
+  accessToken     String
+  institutionId   String?
+  institutionName String
+  status          String      @default("ok")
+  cursor          String?
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  accounts        Account[]
+
+  @@map("plaid_items")
+}
+
+model Account {
+  id                String                  @id @default(uuid())
+  userId            String
+  user              User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  plaidItemId       String?
+  plaidItem         PlaidItem?              @relation(fields: [plaidItemId], references: [id], onDelete: SetNull)
+  plaidAccountId    String?                 @unique
+  name              String
+  officialName      String?
+  mask              String?
+  type              AccountType
+  subtype           String?
+  currentBalance    Float                   @default(0)
+  availableBalance  Float?
+  isoCurrencyCode   String                  @default("USD")
+  isHidden          Boolean                 @default(false)
+  createdAt         DateTime                @default(now())
+  updatedAt         DateTime                @updatedAt
+
+  transactions      Transaction[]
+  balanceHistory    AccountBalanceHistory[]
+  recurringItems    RecurringItem[]
+
+  @@index([userId])
+  @@map("accounts")
+}
+
+model AccountBalanceHistory {
+  id               String   @id @default(uuid())
+  accountId        String
+  account          Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  date             DateTime @db.Date
+  currentBalance   Float
+  availableBalance Float?
+  createdAt        DateTime @default(now())
+
+  @@unique([accountId, date])
+  @@index([date])
+  @@map("account_balance_history")
+}
+
+model CategoryGroup {
+  id         String            @id @default(uuid())
+  userId     String?
+  user       User?             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name       String
+  type       CategoryGroupType @default(VARIABLE_EXPENSE)
+  sortOrder  Int               @default(0)
+  createdAt  DateTime          @default(now())
+  updatedAt  DateTime          @updatedAt
+
+  categories Category[]
+
+  @@index([userId])
+  @@map("category_groups")
+}
+
+model Category {
+  id                String            @id @default(uuid())
+  userId            String?
+  user              User?             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  groupId           String
+  group             CategoryGroup     @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  name              String
+  icon              String?
+  color             String?
+  isRolloverEnabled Boolean           @default(false)
+  isHidden          Boolean           @default(false)
+  sortOrder         Int               @default(0)
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+
+  transactions      Transaction[]
+  splits            TransactionSplit[]
+  budgets           Budget[]
+  recurringItems    RecurringItem[]
+
+  @@index([userId])
+  @@index([groupId])
+  @@map("categories")
+}
+
+model Transaction {
+  id                   String             @id @default(uuid())
+  userId               String
+  user                 User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accountId            String
+  account              Account            @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  categoryId           String?
+  category             Category?          @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  plaidTransactionId   String?            @unique
+  date                 DateTime           @db.Date
+  amount               Float              // Negative for income, positive for expense
+  originalName         String
+  cleanName            String?
+  merchantName         String?
+  pending              Boolean            @default(false)
+  notes                String?
+  tags                 String[]           @default([])
+  isExcludedFromBudget Boolean            @default(false)
+  isSplit              Boolean            @default(false)
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+
+  splits               TransactionSplit[]
+
+  @@index([userId, date])
+  @@index([accountId])
+  @@index([categoryId])
+  @@map("transactions")
+}
+
+model TransactionSplit {
+  id            String      @id @default(uuid())
+  transactionId String
+  transaction   Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  categoryId    String
+  category      Category    @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  amount        Float
+  notes         String?
+  createdAt     DateTime    @default(now())
+
+  @@index([transactionId])
+  @@index([categoryId])
+  @@map("transaction_splits")
+}
+
+model Budget {
+  id             String    @id @default(uuid())
+  userId         String
+  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  categoryId     String
+  category       Category  @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  year           Int
+  month          Int       // 1 to 12
+  budgetedAmount Float     @default(0)
+  rolloverAmount Float     @default(0)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@unique([userId, categoryId, year, month])
+  @@index([userId, year, month])
+  @@map("budgets")
+}
+
+model Rule {
+  id         String   @id @default(uuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name       String
+  priority   Int      @default(0)
+  conditions Json     // JSON array of condition objects { field, operator, value }
+  actions    Json     // JSON array of action objects { type, value }
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([userId])
+  @@map("rules")
+}
+
+model RecurringItem {
+  id             String    @id @default(uuid())
+  userId         String
+  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accountId      String?
+  account        Account?  @relation(fields: [accountId], references: [id], onDelete: SetNull)
+  categoryId     String?
+  category       Category? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  merchantName   String
+  expectedAmount Float
+  frequency      Frequency @default(MONTHLY)
+  nextDate       DateTime  @db.Date
+  lastDate       DateTime? @db.Date
+  isActive       Boolean   @default(true)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@index([userId])
+  @@map("recurring_items")
+}
